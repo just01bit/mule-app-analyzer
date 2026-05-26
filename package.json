@@ -4,7 +4,11 @@
   "description": "This is a node.js application. This app is to analyze MuleSoft applications. Eventually, it will support all types of deployment options - CloudHub 1.0, CloudHub 2.0, Hybrid and RTF etc. At this stage, the app supports CloudHub 1.0",
   "main": "index.js",
   "scripts": {
+    "start": "node mule-app-analyzer",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "mule-app-analyzer": "./mule-app-analyzer"
   },
   "repository": {
     "type": "git",

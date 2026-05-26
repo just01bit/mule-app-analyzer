@@ -85,4 +85,5 @@ Call GET method to the following API and replace {{domain}} and {{fileName}}:
 https://anypoint.mulesoft.com/cloudhub/api/applications/{{domain}}/download/{{fileName}}
 ```
 
-The API will download the applicaiton's .jar file, please save the downloaded .jar file into the folder "mule-apps".
+The API will download the applicaiton's .jar file, please save the downloaded .jar file into the folder "mule-apps". Before calling the API to download the application, please firstly check if it exists in the "mule-apps" folder by checking the "fileName". If yes, please skip the download.
+
