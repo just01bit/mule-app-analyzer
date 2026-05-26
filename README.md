@@ -85,5 +85,11 @@ Call GET method to the following API and replace {{domain}} and {{fileName}}:
 https://anypoint.mulesoft.com/cloudhub/api/applications/{{domain}}/download/{{fileName}}
 ```
 
-The API will download the applicaiton's .jar file, please save the downloaded .jar file into the folder "mule-apps". Before calling the API to download the application, please firstly check if it exists in the "mule-apps" folder by checking the "fileName". If yes, please skip the download.
+The API will download the applicaiton's .jar file, please save the downloaded .jar file into the folder "mule-apps". If "mule-apps" folder doesn't exist, then create it. Before calling the API to download the application, please firstly check if it exists in the "mule-apps" folder by checking the "fileName". If yes, please skip the download.
 
+## Application Workflow
+1. After the application is started, it provides a URL to open in your browser.
+2. The web page shows two buttons: 
+- Download Applications
+- Analyze Applications
+3. By clicking "Download Applications" button, it triggers the "CloudHub 1.0 Workflow". To help the user to see the progress, please provide each application's download progress with progress bar or percentage.
