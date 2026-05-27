@@ -4,6 +4,8 @@ const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { URL } = require("node:url");
+const AdmZip = require("adm-zip");
+const { XMLParser } = require("fast-xml-parser");
 
 const TOKEN_URL = "https://anypoint.mulesoft.com/accounts/api/v2/oauth2/token";
 const APPLICATIONS_URL = "https://anypoint.mulesoft.com/cloudhub/api/v2/applications";
@@ -25,6 +27,24 @@ const downloadState = {
   messages: [],
   applications: [],
 };
+const analyzeState = {
+  running: false,
+  total: 0,
+  processed: 0,
+  complete: 0,
+  failed: 0,
+  status: "idle",
+  startedAt: null,
+  finishedAt: null,
+  dependencyRows: [],
+  sourceEventRows: [],
+  messages: [],
+};
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  removeNSPrefix: true,
+  trimValues: true,
+});
 
 async function main() {
   const [, , clientId, clientSecret] = process.argv;
@@ -81,12 +101,26 @@ function startWebApp(clientId, clientSecret) {
       }
 
       if (req.method === "POST" && requestUrl.pathname === "/api/analyze-applications") {
-        res.writeHead(501, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(
-          JSON.stringify({
-            message: "Analyze Applications is not implemented yet.",
-          })
-        );
+        if (analyzeState.running) {
+          res.writeHead(409, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ message: "Analyze workflow is already running." }));
+          return;
+        }
+
+        runAnalyzeWorkflow().catch((error) => {
+          updateAnalyzeState("error", `Analyze workflow failed: ${error.message}`);
+          analyzeState.running = false;
+          analyzeState.finishedAt = new Date().toISOString();
+        });
+
+        res.writeHead(202, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ message: "Analyze workflow started." }));
+        return;
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/api/analyze-status") {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(buildAnalyzeStatusPayload()));
         return;
       }
 
@@ -209,6 +243,298 @@ function buildStatusPayload() {
   };
 }
 
+async function runAnalyzeWorkflow() {
+  resetAnalyzeState();
+  analyzeState.running = true;
+  analyzeState.status = "running";
+  analyzeState.startedAt = new Date().toISOString();
+  updateAnalyzeState("running", "Scanning mule-apps folder for jar files...");
+
+  const jarFiles = await listJarFiles(DOWNLOAD_DIR);
+  analyzeState.total = jarFiles.length;
+  analyzeState.dependencyRows = jarFiles.map((fileName) => ({
+    fileName,
+    applicationName: "",
+    dependency: "",
+    version: "",
+    status: "New",
+  }));
+  analyzeState.sourceEventRows = jarFiles.map((fileName) => ({
+    fileName,
+    applicationName: "",
+    flowName: "",
+    sourceEventType: "",
+    status: "New",
+  }));
+
+  if (jarFiles.length === 0) {
+    analyzeState.running = false;
+    analyzeState.status = "completed";
+    analyzeState.finishedAt = new Date().toISOString();
+    updateAnalyzeState("completed", "No jar files found in mule-apps.");
+    return;
+  }
+
+  for (const fileName of jarFiles) {
+    setAnalyzeStatusForFile(fileName, "Analyzing", "both");
+    const jarPath = path.join(DOWNLOAD_DIR, fileName);
+
+    try {
+      const zip = new AdmZip(jarPath);
+      const pomContent = readPomXmlFromZip(zip);
+      const { applicationName, dependencies } = extractPomDetails(pomContent);
+      const normalizedDependencies = dependencies.length > 0 ? dependencies : [{ artifactId: "", version: "" }];
+      const sourceEvents = extractSourceEventsFromJar(zip);
+      const normalizedSourceEvents =
+        sourceEvents.length > 0 ? sourceEvents : [{ flowName: "", sourceEventType: "" }];
+
+      replaceAnalyzeRowsForFile(
+        "dependencyRows",
+        fileName,
+        normalizedDependencies.map((dependency) => ({
+          fileName,
+          applicationName,
+          dependency: dependency.artifactId || "",
+          version: dependency.version || "",
+          status: "Complete",
+        }))
+      );
+      replaceAnalyzeRowsForFile(
+        "sourceEventRows",
+        fileName,
+        normalizedSourceEvents.map((event) => ({
+          fileName,
+          applicationName,
+          flowName: event.flowName || "",
+          sourceEventType: event.sourceEventType || "",
+          status: "Complete",
+        }))
+      );
+
+      analyzeState.complete += 1;
+      analyzeState.processed += 1;
+      updateAnalyzeState("running", `Analyzed ${fileName}`);
+    } catch (error) {
+      replaceAnalyzeRowsForFile("dependencyRows", fileName, [
+        {
+          fileName,
+          applicationName: "",
+          dependency: "",
+          version: "",
+          status: "Failed",
+        },
+      ]);
+      replaceAnalyzeRowsForFile("sourceEventRows", fileName, [
+        {
+          fileName,
+          applicationName: "",
+          flowName: "",
+          sourceEventType: "",
+          status: "Failed",
+        },
+      ]);
+
+      analyzeState.failed += 1;
+      analyzeState.processed += 1;
+      updateAnalyzeState("running", `Failed ${fileName}: ${error.message}`);
+    }
+  }
+
+  analyzeState.running = false;
+  analyzeState.status = "completed";
+  analyzeState.finishedAt = new Date().toISOString();
+  updateAnalyzeState(
+    "completed",
+    `Analyze complete. Total ${analyzeState.total}, complete ${analyzeState.complete}, failed ${analyzeState.failed}.`
+  );
+}
+
+async function listJarFiles(dirPath) {
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".jar"))
+      .map((entry) => entry.name);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function readPomXmlFromJar(jarPath) {
+  const zip = new AdmZip(jarPath);
+  return readPomXmlFromZip(zip);
+}
+
+function readPomXmlFromZip(zip) {
+  const entry = zip
+    .getEntries()
+    .find((item) => !item.isDirectory && item.entryName.toLowerCase().endsWith("pom.xml"));
+
+  if (!entry) {
+    throw new Error("pom.xml not found");
+  }
+
+  return zip.readAsText(entry, "utf8");
+}
+
+function extractSourceEventsFromJar(zip) {
+  const muleXmlEntries = zip.getEntries().filter(
+    (entry) =>
+      !entry.isDirectory &&
+      isMuleFlowXmlPath(entry.entryName) &&
+      entry.entryName.toLowerCase().endsWith(".xml")
+  );
+
+  const sourceEvents = [];
+  const uniqueKeys = new Set();
+  for (const entry of muleXmlEntries) {
+    const xmlContent = zip.readAsText(entry, "utf8");
+    for (const event of extractSourceEventsFromMuleXml(xmlContent)) {
+      const key = `${event.flowName}::${event.sourceEventType}`;
+      if (uniqueKeys.has(key)) {
+        continue;
+      }
+      uniqueKeys.add(key);
+      sourceEvents.push(event);
+    }
+  }
+  return sourceEvents;
+}
+
+function isMuleFlowXmlPath(entryName) {
+  const normalized = entryName.replaceAll("\\\\", "/").toLowerCase();
+
+  // Requested path in source projects
+  if (normalized.startsWith("src/main/mule/")) {
+    return true;
+  }
+
+  // Common packaged Mule app layout in JARs
+  if (normalized.includes("/src/main/mule/")) {
+    return true;
+  }
+
+  // Many Mule apps also include deployed flow files at the jar root
+  if (!normalized.includes("/") && normalized.endsWith(".xml")) {
+    return true;
+  }
+
+  return false;
+}
+
+function extractSourceEventsFromMuleXml(xmlContent) {
+  const events = [];
+  const flowRegex = /<flow\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)<\/flow>/g;
+
+  for (const flowMatch of xmlContent.matchAll(flowRegex)) {
+    const flowName = flowMatch[1] || "";
+    const flowBody = flowMatch[2] || "";
+    const listenerRegex = /<([A-Za-z0-9_-]+):listener\b/g;
+    const seenTypes = new Set();
+
+    for (const listenerMatch of flowBody.matchAll(listenerRegex)) {
+      const sourceEventType = listenerMatch[1] || "";
+      if (!sourceEventType || seenTypes.has(sourceEventType)) {
+        continue;
+      }
+      seenTypes.add(sourceEventType);
+      events.push({ flowName, sourceEventType });
+    }
+  }
+
+  return events;
+}
+
+function extractPomDetails(pomContent) {
+  const parsed = xmlParser.parse(pomContent);
+  const project = parsed?.project;
+  if (!project) {
+    throw new Error("Invalid pom.xml: missing project node");
+  }
+
+  const applicationName = normalizeSingleValue(project.name);
+  const dependencyNodes = toArray(project?.dependencies?.dependency);
+  const dependencies = dependencyNodes.map((dependencyNode) => ({
+    artifactId: normalizeSingleValue(dependencyNode?.artifactId),
+    version: normalizeSingleValue(dependencyNode?.version),
+  }));
+
+  return { applicationName, dependencies };
+}
+
+function toArray(value) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function normalizeSingleValue(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return String(value);
+}
+
+function resetAnalyzeState() {
+  analyzeState.running = false;
+  analyzeState.total = 0;
+  analyzeState.processed = 0;
+  analyzeState.complete = 0;
+  analyzeState.failed = 0;
+  analyzeState.status = "idle";
+  analyzeState.startedAt = null;
+  analyzeState.finishedAt = null;
+  analyzeState.dependencyRows = [];
+  analyzeState.sourceEventRows = [];
+  analyzeState.messages = [];
+}
+
+function updateAnalyzeState(status, message) {
+  analyzeState.status = status;
+  analyzeState.messages.push({
+    time: new Date().toISOString(),
+    message,
+  });
+
+  if (analyzeState.messages.length > 50) {
+    analyzeState.messages = analyzeState.messages.slice(-50);
+  }
+}
+
+function setAnalyzeStatusForFile(fileName, status, targetTable) {
+  if (targetTable === "dependencyRows" || targetTable === "both") {
+    analyzeState.dependencyRows = analyzeState.dependencyRows.map((row) =>
+      row.fileName === fileName ? { ...row, status } : row
+    );
+  }
+  if (targetTable === "sourceEventRows" || targetTable === "both") {
+    analyzeState.sourceEventRows = analyzeState.sourceEventRows.map((row) =>
+      row.fileName === fileName ? { ...row, status } : row
+    );
+  }
+}
+
+function replaceAnalyzeRowsForFile(tableKey, fileName, nextRows) {
+  analyzeState[tableKey] = analyzeState[tableKey].filter((row) => row.fileName !== fileName).concat(nextRows);
+}
+
+function buildAnalyzeStatusPayload() {
+  const percentage =
+    analyzeState.total > 0 ? Math.round((analyzeState.processed / analyzeState.total) * 100) : 0;
+
+  return {
+    ...analyzeState,
+    percentage,
+  };
+}
+
 function getHtmlPage() {
   return `<!doctype html>
 <html lang="en">
@@ -233,6 +559,10 @@ function getHtmlPage() {
     .status-downloaded { color: #047857; font-weight: 600; }
     .status-skipped { color: #6b7280; }
     .status-failed { color: #b91c1c; font-weight: 600; }
+    .status-New { color: #374151; }
+    .status-Analyzing { color: #1d4ed8; font-weight: 600; }
+    .status-Complete { color: #047857; font-weight: 600; }
+    .status-Failed { color: #b91c1c; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -256,6 +586,39 @@ function getHtmlPage() {
       </thead>
       <tbody id="outputRows"></tbody>
     </table>
+
+    <div class="progress-wrap">
+      <progress id="analyzeProgressBar" max="100" value="0"></progress>
+      <div class="meta" id="analyzeProgressText">Analyze Progress: 0%</div>
+    </div>
+
+    <h3>Dependencies</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>File Name</th>
+          <th>Application Name</th>
+          <th>Dependency</th>
+          <th>Version</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="dependencyRows"></tbody>
+    </table>
+
+    <h3>Source Event Type</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>File Name</th>
+          <th>Application Name</th>
+          <th>Flow Name</th>
+          <th>Source Event Type</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="sourceEventRows"></tbody>
+    </table>
   </div>
 
   <script>
@@ -264,7 +627,12 @@ function getHtmlPage() {
     const outputRows = document.getElementById("outputRows");
     const downloadBtn = document.getElementById("downloadBtn");
     const analyzeBtn = document.getElementById("analyzeBtn");
-    let pollTimer = null;
+    const analyzeProgressBar = document.getElementById("analyzeProgressBar");
+    const analyzeProgressText = document.getElementById("analyzeProgressText");
+    const dependencyRows = document.getElementById("dependencyRows");
+    const sourceEventRows = document.getElementById("sourceEventRows");
+    let downloadPollTimer = null;
+    let analyzePollTimer = null;
 
     function escapeHtml(value) {
       return value
@@ -290,9 +658,9 @@ function getHtmlPage() {
         })
         .join("");
 
-      if (!data.running && pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
+      if (!data.running && downloadPollTimer) {
+        clearInterval(downloadPollTimer);
+        downloadPollTimer = null;
         downloadBtn.disabled = false;
       }
     }
@@ -315,16 +683,70 @@ function getHtmlPage() {
       }
 
       await fetchStatus();
-      pollTimer = setInterval(fetchStatus, 1000);
+      downloadPollTimer = setInterval(fetchStatus, 1000);
     });
 
+    function renderAnalyzeStatus(data) {
+      analyzeProgressBar.value = data.percentage || 0;
+      analyzeProgressText.textContent =
+        "Analyze Progress: " + (data.percentage || 0) + "% (" + data.processed + "/" + data.total +
+        "), complete: " + data.complete + ", failed: " + data.failed;
+
+      dependencyRows.innerHTML = (data.dependencyRows || [])
+        .map((row) => {
+          const safeStatus = escapeHtml(row.status || "New");
+          return "<tr>" +
+            "<td>" + escapeHtml(row.fileName || "") + "</td>" +
+            "<td>" + escapeHtml(row.applicationName || "") + "</td>" +
+            "<td>" + escapeHtml(row.dependency || "") + "</td>" +
+            "<td>" + escapeHtml(row.version || "") + "</td>" +
+            "<td class=\\"status-" + safeStatus + "\\">" + safeStatus + "</td>" +
+            "</tr>";
+        })
+        .join("");
+      sourceEventRows.innerHTML = (data.sourceEventRows || [])
+        .map((row) => {
+          const safeStatus = escapeHtml(row.status || "New");
+          return "<tr>" +
+            "<td>" + escapeHtml(row.fileName || "") + "</td>" +
+            "<td>" + escapeHtml(row.applicationName || "") + "</td>" +
+            "<td>" + escapeHtml(row.flowName || "") + "</td>" +
+            "<td>" + escapeHtml(row.sourceEventType || "") + "</td>" +
+            "<td class=\\"status-" + safeStatus + "\\">" + safeStatus + "</td>" +
+            "</tr>";
+        })
+        .join("");
+
+      if (!data.running && analyzePollTimer) {
+        clearInterval(analyzePollTimer);
+        analyzePollTimer = null;
+        analyzeBtn.disabled = false;
+      }
+    }
+
+    async function fetchAnalyzeStatus() {
+      const response = await fetch("/api/analyze-status");
+      const data = await response.json();
+      renderAnalyzeStatus(data);
+    }
+
     analyzeBtn.addEventListener("click", async () => {
+      analyzeBtn.disabled = true;
       const response = await fetch("/api/analyze-applications", { method: "POST" });
       const data = await response.json();
-      alert(data.message || "Analyze action completed.");
+
+      if (!response.ok) {
+        alert(data.message || "Unable to start analyze workflow.");
+        analyzeBtn.disabled = false;
+        return;
+      }
+
+      await fetchAnalyzeStatus();
+      analyzePollTimer = setInterval(fetchAnalyzeStatus, 1000);
     });
 
     fetchStatus();
+    fetchAnalyzeStatus();
   </script>
 </body>
 </html>`;
