@@ -21,6 +21,12 @@ Current scope:
 
 ## Run the Application
 
+Install dependencies:
+
+```bash
+npm install
+```
+
 Start the app:
 
 ```bash
