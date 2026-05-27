@@ -21,6 +21,14 @@ Current scope:
 
 ## Run the Application
 
+After downloading the app, open a terminal and go to the app folder first:
+
+```bash
+cd mule-app-analyzer
+```
+
+Then run the following commands:
+
 Install dependencies:
 
 ```bash
@@ -30,7 +38,7 @@ npm install
 Start the app:
 
 ```bash
-node mule-app-analyzer <client_id> <client_secret>
+node mule-app-analyzer <connected_app_client_id> <connected_app_client_secret>
 ```
 
 Open in browser:
