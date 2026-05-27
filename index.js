@@ -664,6 +664,7 @@ function getHtmlPage() {
     <div class="progress-wrap">
       <progress id="analyzeProgressBar" max="100" value="0"></progress>
       <div class="meta" id="analyzeProgressText">Analyze Progress: 0%</div>
+      <div class="meta" id="analyzeTimeText">Start time: - | Complete time: -</div>
     </div>
 
     <div class="table-header">
@@ -725,6 +726,7 @@ function getHtmlPage() {
     const analyzeBtn = document.getElementById("analyzeBtn");
     const analyzeProgressBar = document.getElementById("analyzeProgressBar");
     const analyzeProgressText = document.getElementById("analyzeProgressText");
+    const analyzeTimeText = document.getElementById("analyzeTimeText");
     const dependencyRows = document.getElementById("dependencyRows");
     const sourceEventRows = document.getElementById("sourceEventRows");
     const salesforceAuthRows = document.getElementById("salesforceAuthRows");
@@ -794,9 +796,12 @@ function getHtmlPage() {
     function renderAnalyzeStatus(data) {
       latestAnalyzeStatus = data || latestAnalyzeStatus;
       analyzeProgressBar.value = data.percentage || 0;
+      const startTime = data.startedAt ? new Date(data.startedAt).toLocaleString() : "-";
+      const completeTime = data.finishedAt ? new Date(data.finishedAt).toLocaleString() : "-";
       analyzeProgressText.textContent =
         "Analyze Progress: " + (data.percentage || 0) + "% (" + data.processed + "/" + data.total +
         "), complete: " + data.complete + ", failed: " + data.failed;
+      analyzeTimeText.textContent = "Start time: " + startTime + " | Complete time: " + completeTime;
 
       dependencyRows.innerHTML = (data.dependencyRows || [])
         .map((row) => {
