@@ -13,6 +13,8 @@ const DOWNLOAD_URL_TEMPLATE =
   "https://anypoint.mulesoft.com/cloudhub/api/applications/{domain}/download/{fileName}";
 const DOWNLOAD_DIR = "mule-apps";
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
+const DOWNLOAD_CONCURRENCY = Math.max(1, Number(process.env.DOWNLOAD_CONCURRENCY || 10));
+const DOWNLOAD_RETRIES = Math.max(0, Number(process.env.DOWNLOAD_RETRIES || 2));
 
 const downloadState = {
   running: false,
@@ -165,35 +167,34 @@ async function runDownloadWorkflow(clientId, clientSecret) {
     status: "new",
   }));
   await fs.mkdir(DOWNLOAD_DIR, { recursive: true });
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    const app = candidates[i];
+  updateState("running", `Downloading ${candidates.length} applications with concurrency ${DOWNLOAD_CONCURRENCY}...`);
+  await runWithConcurrency(candidates, DOWNLOAD_CONCURRENCY, async (app, index) => {
     const { domain, fileName } = app;
     const targetPath = path.join(DOWNLOAD_DIR, fileName);
-    setApplicationStatus(i, "downloading");
+    setApplicationStatus(index, "downloading");
     const alreadyExists = await fileExists(targetPath);
 
     if (alreadyExists) {
       downloadState.skipped += 1;
       downloadState.processed += 1;
-      setApplicationStatus(i, "skipped");
+      setApplicationStatus(index, "skipped");
       updateState("running", `Skipped existing file: ${fileName}`);
-      continue;
+      return;
     }
 
     try {
-      await downloadApplicationJar(accessToken, domain, fileName, targetPath);
+      await downloadApplicationJarWithRetry(accessToken, domain, fileName, targetPath);
       downloadState.downloaded += 1;
       downloadState.processed += 1;
-      setApplicationStatus(i, "downloaded");
+      setApplicationStatus(index, "downloaded");
       updateState("running", `Downloaded: ${fileName}`);
     } catch (error) {
       downloadState.failed += 1;
       downloadState.processed += 1;
-      setApplicationStatus(i, "failed");
+      setApplicationStatus(index, "failed");
       updateState("running", `Failed ${fileName}: ${error.message}`);
     }
-  }
+  });
 
   downloadState.running = false;
   downloadState.finishedAt = new Date().toISOString();
@@ -201,6 +202,41 @@ async function runDownloadWorkflow(clientId, clientSecret) {
     "completed",
     `Done. Downloaded ${downloadState.downloaded}, skipped ${downloadState.skipped}, failed ${downloadState.failed}.`
   );
+}
+
+async function runWithConcurrency(items, concurrency, workerFn) {
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      await workerFn(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+}
+
+async function downloadApplicationJarWithRetry(accessToken, domain, fileName, targetPath) {
+  let attempt = 0;
+  while (attempt <= DOWNLOAD_RETRIES) {
+    try {
+      await downloadApplicationJar(accessToken, domain, fileName, targetPath);
+      return;
+    } catch (error) {
+      attempt += 1;
+      if (attempt > DOWNLOAD_RETRIES) {
+        throw error;
+      }
+      const waitMs = Math.min(3000, 250 * 2 ** attempt);
+      await wait(waitMs);
+    }
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function resetDownloadState() {
@@ -685,11 +721,17 @@ function getHtmlPage() {
       width: 100%;
       border-collapse: separate;
       border-spacing: 0;
-      margin-top: 0.75rem;
       border: 1px solid #d7e4ff;
       border-radius: 12px;
       overflow: hidden;
       background: #ffffff;
+    }
+    .table-scroll {
+      margin-top: 0.75rem;
+      max-height: 360px;
+      overflow-y: auto;
+      border-radius: 12px;
+      box-shadow: inset 0 0 0 1px #d7e4ff;
     }
     th, td {
       border-bottom: 1px solid #e6eeff;
@@ -703,6 +745,9 @@ function getHtmlPage() {
       color: #1e3a8a;
       font-weight: 700;
       border-bottom: 1px solid #cfe0ff;
+      position: sticky;
+      top: 0;
+      z-index: 1;
     }
     tr:last-child td { border-bottom: none; }
     tr:nth-child(even) td { background: #fbfdff; }
@@ -729,18 +774,21 @@ function getHtmlPage() {
     <div class="progress-wrap">
       <progress id="progressBar" max="100" value="0"></progress>
       <div class="meta" id="progressText">Progress: 0%</div>
+      <div class="meta" id="downloadTimeText">Start time: - | Complete time: -</div>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>Application Name</th>
-          <th>File Name</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="outputRows"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Application Name</th>
+            <th>File Name</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="outputRows"></tbody>
+      </table>
+    </div>
 
     <div class="progress-wrap">
       <progress id="analyzeProgressBar" max="100" value="0"></progress>
@@ -752,56 +800,63 @@ function getHtmlPage() {
       <h3>Dependencies</h3>
       <button id="downloadDependenciesCsvBtn" class="secondary">Download Result</button>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th>File Name</th>
-          <th>Application Name</th>
-          <th>Dependency</th>
-          <th>Version</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="dependencyRows"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th>Application Name</th>
+            <th>Dependency</th>
+            <th>Version</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="dependencyRows"></tbody>
+      </table>
+    </div>
 
     <div class="table-header">
       <h3>Source Event Type</h3>
       <button id="downloadSourceEventCsvBtn" class="secondary">Download Result</button>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th>File Name</th>
-          <th>Application Name</th>
-          <th>Flow Name</th>
-          <th>Source Event Type</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="sourceEventRows"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th>Application Name</th>
+            <th>Flow Name</th>
+            <th>Source Event Type</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="sourceEventRows"></tbody>
+      </table>
+    </div>
 
     <div class="table-header">
       <h3>Salesforce Auth Type</h3>
       <button id="downloadSalesforceAuthCsvBtn" class="secondary">Download Result</button>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th>File Name</th>
-          <th>Application Name</th>
-          <th>Salesforce Auth Type</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="salesforceAuthRows"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th>Application Name</th>
+            <th>Salesforce Auth Type</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="salesforceAuthRows"></tbody>
+      </table>
+    </div>
   </div>
 
   <script>
     const progressBar = document.getElementById("progressBar");
     const progressText = document.getElementById("progressText");
+    const downloadTimeText = document.getElementById("downloadTimeText");
     const outputRows = document.getElementById("outputRows");
     const downloadBtn = document.getElementById("downloadBtn");
     const analyzeBtn = document.getElementById("analyzeBtn");
@@ -831,9 +886,12 @@ function getHtmlPage() {
 
     function renderStatus(data) {
       progressBar.value = data.percentage || 0;
+      const startTime = data.startedAt ? new Date(data.startedAt).toLocaleString() : "-";
+      const completeTime = data.finishedAt ? new Date(data.finishedAt).toLocaleString() : "-";
       progressText.textContent =
         "Progress: " + (data.percentage || 0) + "% (" + data.processed + "/" + data.total + "), downloaded: " +
         data.downloaded + ", skipped: " + data.skipped + ", failed: " + data.failed;
+      downloadTimeText.textContent = "Start time: " + startTime + " | Complete time: " + completeTime;
 
       outputRows.innerHTML = (data.applications || [])
         .map((app) => {
