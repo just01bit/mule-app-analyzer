@@ -38,6 +38,7 @@ const analyzeState = {
   finishedAt: null,
   dependencyRows: [],
   sourceEventRows: [],
+  salesforceAuthRows: [],
   messages: [],
 };
 const xmlParser = new XMLParser({
@@ -266,6 +267,7 @@ async function runAnalyzeWorkflow() {
     sourceEventType: "",
     status: "New",
   }));
+  analyzeState.salesforceAuthRows = [];
 
   if (appArchiveFiles.length === 0) {
     analyzeState.running = false;
@@ -287,6 +289,7 @@ async function runAnalyzeWorkflow() {
       const sourceEvents = extractSourceEventsFromJar(zip);
       const normalizedSourceEvents =
         sourceEvents.length > 0 ? sourceEvents : [{ flowName: "", sourceEventType: "" }];
+      const salesforceAuthTypes = extractSalesforceAuthTypesFromJar(zip);
 
       replaceAnalyzeRowsForFile(
         "dependencyRows",
@@ -310,6 +313,18 @@ async function runAnalyzeWorkflow() {
           status: "Complete",
         }))
       );
+      if (salesforceAuthTypes.length > 0) {
+        replaceAnalyzeRowsForFile(
+          "salesforceAuthRows",
+          fileName,
+          salesforceAuthTypes.map((item) => ({
+            fileName,
+            applicationName,
+            salesforceAuthType: item.salesforceAuthType || "",
+            status: "Complete",
+          }))
+        );
+      }
 
       analyzeState.complete += 1;
       analyzeState.processed += 1;
@@ -333,6 +348,8 @@ async function runAnalyzeWorkflow() {
           status: "Failed",
         },
       ]);
+      // Only include Salesforce rows for apps that actually have Salesforce config.
+      // On failure we keep this table clean instead of emitting empty placeholder rows.
 
       analyzeState.failed += 1;
       analyzeState.processed += 1;
@@ -409,6 +426,30 @@ function extractSourceEventsFromJar(zip) {
   return sourceEvents;
 }
 
+function extractSalesforceAuthTypesFromJar(zip) {
+  const muleXmlEntries = zip.getEntries().filter(
+    (entry) =>
+      !entry.isDirectory &&
+      isMuleFlowXmlPath(entry.entryName) &&
+      entry.entryName.toLowerCase().endsWith(".xml")
+  );
+
+  const authTypes = [];
+  const uniqueTypes = new Set();
+  for (const entry of muleXmlEntries) {
+    const xmlContent = zip.readAsText(entry, "utf8");
+    for (const item of extractSalesforceAuthTypesFromMuleXml(xmlContent)) {
+      const key = item.salesforceAuthType;
+      if (uniqueTypes.has(key)) {
+        continue;
+      }
+      uniqueTypes.add(key);
+      authTypes.push(item);
+    }
+  }
+  return authTypes;
+}
+
 function isMuleFlowXmlPath(entryName) {
   const normalized = entryName.replaceAll("\\\\", "/").toLowerCase();
 
@@ -451,6 +492,25 @@ function extractSourceEventsFromMuleXml(xmlContent) {
   }
 
   return events;
+}
+
+function extractSalesforceAuthTypesFromMuleXml(xmlContent) {
+  const authTypes = [];
+  const sfdcConfigRegex = /<salesforce:sfdc-config\b[\s\S]*?<\/salesforce:sfdc-config>/g;
+  const configBlocks = xmlContent.match(sfdcConfigRegex) || [];
+
+  for (const configBlock of configBlocks) {
+    const connectionRegex = /<salesforce:([A-Za-z0-9_-]+)-connection\b[^>]*\/?>/g;
+    for (const match of configBlock.matchAll(connectionRegex)) {
+      const authType = match[1] || "";
+      if (!authType) {
+        continue;
+      }
+      authTypes.push({ salesforceAuthType: authType });
+    }
+  }
+
+  return authTypes;
 }
 
 function extractPomDetails(pomContent) {
@@ -498,6 +558,7 @@ function resetAnalyzeState() {
   analyzeState.finishedAt = null;
   analyzeState.dependencyRows = [];
   analyzeState.sourceEventRows = [];
+  analyzeState.salesforceAuthRows = [];
   analyzeState.messages = [];
 }
 
@@ -521,6 +582,11 @@ function setAnalyzeStatusForFile(fileName, status, targetTable) {
   }
   if (targetTable === "sourceEventRows" || targetTable === "both") {
     analyzeState.sourceEventRows = analyzeState.sourceEventRows.map((row) =>
+      row.fileName === fileName ? { ...row, status } : row
+    );
+  }
+  if (targetTable === "salesforceAuthRows" || targetTable === "both") {
+    analyzeState.salesforceAuthRows = analyzeState.salesforceAuthRows.map((row) =>
       row.fileName === fileName ? { ...row, status } : row
     );
   }
@@ -624,6 +690,19 @@ function getHtmlPage() {
       </thead>
       <tbody id="sourceEventRows"></tbody>
     </table>
+
+    <h3>Salesforce Auth Type</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>File Name</th>
+          <th>Application Name</th>
+          <th>Salesforce Auth Type</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="salesforceAuthRows"></tbody>
+    </table>
   </div>
 
   <script>
@@ -636,6 +715,7 @@ function getHtmlPage() {
     const analyzeProgressText = document.getElementById("analyzeProgressText");
     const dependencyRows = document.getElementById("dependencyRows");
     const sourceEventRows = document.getElementById("sourceEventRows");
+    const salesforceAuthRows = document.getElementById("salesforceAuthRows");
     let downloadPollTimer = null;
     let analyzePollTimer = null;
 
@@ -717,6 +797,17 @@ function getHtmlPage() {
             "<td>" + escapeHtml(row.applicationName || "") + "</td>" +
             "<td>" + escapeHtml(row.flowName || "") + "</td>" +
             "<td>" + escapeHtml(row.sourceEventType || "") + "</td>" +
+            "<td class=\\"status-" + safeStatus + "\\">" + safeStatus + "</td>" +
+            "</tr>";
+        })
+        .join("");
+      salesforceAuthRows.innerHTML = (data.salesforceAuthRows || [])
+        .map((row) => {
+          const safeStatus = escapeHtml(row.status || "New");
+          return "<tr>" +
+            "<td>" + escapeHtml(row.fileName || "") + "</td>" +
+            "<td>" + escapeHtml(row.applicationName || "") + "</td>" +
+            "<td>" + escapeHtml(row.salesforceAuthType || "") + "</td>" +
             "<td class=\\"status-" + safeStatus + "\\">" + safeStatus + "</td>" +
             "</tr>";
         })
