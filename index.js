@@ -614,29 +614,110 @@ function getHtmlPage() {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mule App Analyzer</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; }
-    .container { max-width: 760px; }
-    button { margin-right: 0.75rem; margin-bottom: 0.75rem; padding: 0.6rem 1rem; border: 0; border-radius: 6px; background: #2563eb; color: white; cursor: pointer; }
-    button.secondary { background: #4b5563; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .progress-wrap { margin-top: 1rem; }
-    progress { width: 100%; height: 18px; }
-    .meta { margin-top: 0.5rem; color: #4b5563; }
-    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-    th, td { border: 1px solid #d1d5db; padding: 0.55rem; text-align: left; }
-    th { background: #f3f4f6; }
-    .table-header { margin-top: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
-    .table-header h3 { margin: 0; }
-    .table-header button { margin: 0; padding: 0.45rem 0.8rem; font-size: 0.9rem; }
-    .status-new { color: #374151; }
-    .status-downloading { color: #1d4ed8; font-weight: 600; }
-    .status-downloaded { color: #047857; font-weight: 600; }
-    .status-skipped { color: #6b7280; }
-    .status-failed { color: #b91c1c; font-weight: 600; }
-    .status-New { color: #374151; }
-    .status-Analyzing { color: #1d4ed8; font-weight: 600; }
-    .status-Complete { color: #047857; font-weight: 600; }
-    .status-Failed { color: #b91c1c; font-weight: 600; }
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      color: #0f172a;
+      background: linear-gradient(160deg, #f3fcff 0%, #eef4ff 50%, #f6f7ff 100%);
+    }
+    .container {
+      max-width: 1120px;
+      margin: 2rem auto;
+      padding: 1.25rem 1.5rem 2rem;
+      background: #ffffff;
+      border: 1px solid #d9e7ff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(82, 90, 255, 0.08);
+    }
+    h1 {
+      margin-top: 0.25rem;
+      margin-bottom: 1rem;
+      font-size: 2rem;
+      letter-spacing: -0.02em;
+      color: #1a2a57;
+    }
+    button {
+      margin-right: 0.75rem;
+      margin-bottom: 0.75rem;
+      padding: 0.62rem 1.05rem;
+      border: 0;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #4ab5b5 0%, #525aff 100%);
+      color: #ffffff;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      box-shadow: 0 6px 14px rgba(82, 90, 255, 0.22);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(82, 90, 255, 0.28); }
+    button.secondary {
+      background: linear-gradient(135deg, #6d8bc0 0%, #4ab5b5 100%);
+      box-shadow: 0 6px 14px rgba(74, 181, 181, 0.22);
+    }
+    button:disabled { opacity: 0.62; cursor: not-allowed; transform: none; box-shadow: none; }
+    .progress-wrap {
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
+      border: 1px solid #d7e4ff;
+      border-radius: 12px;
+      background: #f8fbff;
+    }
+    progress {
+      width: 100%;
+      height: 14px;
+      border: 0;
+      border-radius: 999px;
+      overflow: hidden;
+      background-color: #dbeafe;
+    }
+    progress::-webkit-progress-bar { background-color: #dbeafe; border-radius: 999px; }
+    progress::-webkit-progress-value {
+      background: linear-gradient(90deg, #8fd9fb 0%, #4ab5b5 45%, #525aff 100%);
+      border-radius: 999px;
+    }
+    progress::-moz-progress-bar {
+      background: linear-gradient(90deg, #8fd9fb 0%, #4ab5b5 45%, #525aff 100%);
+      border-radius: 999px;
+    }
+    .meta { margin-top: 0.5rem; color: #334155; font-size: 0.95rem; }
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin-top: 0.75rem;
+      border: 1px solid #d7e4ff;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+    th, td {
+      border-bottom: 1px solid #e6eeff;
+      padding: 0.62rem 0.72rem;
+      text-align: left;
+      vertical-align: top;
+      font-size: 0.92rem;
+    }
+    th {
+      background: linear-gradient(180deg, #f0f6ff 0%, #e7f3ff 100%);
+      color: #1e3a8a;
+      font-weight: 700;
+      border-bottom: 1px solid #cfe0ff;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) td { background: #fbfdff; }
+    .table-header { margin-top: 1.1rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+    .table-header h3 { margin: 0; color: #1e3a8a; font-size: 1.06rem; }
+    .table-header button { margin: 0; padding: 0.45rem 0.8rem; font-size: 0.88rem; }
+    .status-new { color: #334155; font-weight: 600; }
+    .status-downloading { color: #525aff; font-weight: 700; }
+    .status-downloaded { color: #0f766e; font-weight: 700; }
+    .status-skipped { color: #64748b; font-weight: 600; }
+    .status-failed { color: #b91c1c; font-weight: 700; }
+    .status-New { color: #334155; font-weight: 600; }
+    .status-Analyzing { color: #525aff; font-weight: 700; }
+    .status-Complete { color: #0f766e; font-weight: 700; }
+    .status-Failed { color: #b91c1c; font-weight: 700; }
   </style>
 </head>
 <body>
