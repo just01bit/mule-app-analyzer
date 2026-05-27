@@ -625,6 +625,9 @@ function getHtmlPage() {
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
     th, td { border: 1px solid #d1d5db; padding: 0.55rem; text-align: left; }
     th { background: #f3f4f6; }
+    .table-header { margin-top: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+    .table-header h3 { margin: 0; }
+    .table-header button { margin: 0; padding: 0.45rem 0.8rem; font-size: 0.9rem; }
     .status-new { color: #374151; }
     .status-downloading { color: #1d4ed8; font-weight: 600; }
     .status-downloaded { color: #047857; font-weight: 600; }
@@ -663,7 +666,10 @@ function getHtmlPage() {
       <div class="meta" id="analyzeProgressText">Analyze Progress: 0%</div>
     </div>
 
-    <h3>Dependencies</h3>
+    <div class="table-header">
+      <h3>Dependencies</h3>
+      <button id="downloadDependenciesCsvBtn" class="secondary">Download Result</button>
+    </div>
     <table>
       <thead>
         <tr>
@@ -677,7 +683,10 @@ function getHtmlPage() {
       <tbody id="dependencyRows"></tbody>
     </table>
 
-    <h3>Source Event Type</h3>
+    <div class="table-header">
+      <h3>Source Event Type</h3>
+      <button id="downloadSourceEventCsvBtn" class="secondary">Download Result</button>
+    </div>
     <table>
       <thead>
         <tr>
@@ -691,7 +700,10 @@ function getHtmlPage() {
       <tbody id="sourceEventRows"></tbody>
     </table>
 
-    <h3>Salesforce Auth Type</h3>
+    <div class="table-header">
+      <h3>Salesforce Auth Type</h3>
+      <button id="downloadSalesforceAuthCsvBtn" class="secondary">Download Result</button>
+    </div>
     <table>
       <thead>
         <tr>
@@ -716,8 +728,16 @@ function getHtmlPage() {
     const dependencyRows = document.getElementById("dependencyRows");
     const sourceEventRows = document.getElementById("sourceEventRows");
     const salesforceAuthRows = document.getElementById("salesforceAuthRows");
+    const downloadDependenciesCsvBtn = document.getElementById("downloadDependenciesCsvBtn");
+    const downloadSourceEventCsvBtn = document.getElementById("downloadSourceEventCsvBtn");
+    const downloadSalesforceAuthCsvBtn = document.getElementById("downloadSalesforceAuthCsvBtn");
     let downloadPollTimer = null;
     let analyzePollTimer = null;
+    let latestAnalyzeStatus = {
+      dependencyRows: [],
+      sourceEventRows: [],
+      salesforceAuthRows: [],
+    };
 
     function escapeHtml(value) {
       return value
@@ -772,6 +792,7 @@ function getHtmlPage() {
     });
 
     function renderAnalyzeStatus(data) {
+      latestAnalyzeStatus = data || latestAnalyzeStatus;
       analyzeProgressBar.value = data.percentage || 0;
       analyzeProgressText.textContent =
         "Analyze Progress: " + (data.percentage || 0) + "% (" + data.processed + "/" + data.total +
@@ -826,6 +847,50 @@ function getHtmlPage() {
       renderAnalyzeStatus(data);
     }
 
+    function toCsvValue(value) {
+      const text = value === undefined || value === null ? "" : String(value);
+      return '"' + text.replaceAll('"', '""') + '"';
+    }
+
+    function buildCsvContent(headers, rows, rowMapper) {
+      const headerLine = headers.map(toCsvValue).join(",");
+      const dataLines = (rows || []).map((row) => rowMapper(row).map(toCsvValue).join(","));
+      return [headerLine].concat(dataLines).join("\\n");
+    }
+
+    async function saveCsv(fileName, csvContent) {
+      if (window.showSaveFilePicker) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: fileName,
+            types: [
+              {
+                description: "CSV file",
+                accept: { "text/csv": [".csv"] },
+              },
+            ],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(csvContent);
+          await writable.close();
+          return;
+        } catch (error) {
+          // Fall back to browser download when picker is cancelled or unsupported.
+        }
+      }
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
     analyzeBtn.addEventListener("click", async () => {
       analyzeBtn.disabled = true;
       const response = await fetch("/api/analyze-applications", { method: "POST" });
@@ -839,6 +904,33 @@ function getHtmlPage() {
 
       await fetchAnalyzeStatus();
       analyzePollTimer = setInterval(fetchAnalyzeStatus, 1000);
+    });
+
+    downloadDependenciesCsvBtn.addEventListener("click", async () => {
+      const csvContent = buildCsvContent(
+        ["File Name", "Application Name", "Dependency", "Version", "Status"],
+        latestAnalyzeStatus.dependencyRows || [],
+        (row) => [row.fileName, row.applicationName, row.dependency, row.version, row.status]
+      );
+      await saveCsv("dependencies-result.csv", csvContent);
+    });
+
+    downloadSourceEventCsvBtn.addEventListener("click", async () => {
+      const csvContent = buildCsvContent(
+        ["File Name", "Application Name", "Flow Name", "Source Event Type", "Status"],
+        latestAnalyzeStatus.sourceEventRows || [],
+        (row) => [row.fileName, row.applicationName, row.flowName, row.sourceEventType, row.status]
+      );
+      await saveCsv("source-event-type-result.csv", csvContent);
+    });
+
+    downloadSalesforceAuthCsvBtn.addEventListener("click", async () => {
+      const csvContent = buildCsvContent(
+        ["File Name", "Application Name", "Salesforce Auth Type", "Status"],
+        latestAnalyzeStatus.salesforceAuthRows || [],
+        (row) => [row.fileName, row.applicationName, row.salesforceAuthType, row.status]
+      );
+      await saveCsv("salesforce-auth-type-result.csv", csvContent);
     });
 
     fetchStatus();

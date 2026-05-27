@@ -1,95 +1,156 @@
 # mule-app-analyzer
 
 ## Overview
-This is a node.js application.
-This app is to analyze MuleSoft applications.
-Eventually, it will support all types of deployment options - CloudHub 1.0, CloudHub 2.0, Hybrid and RTF etc.
-At this stage, the app supports CloudHub 1.0
 
-## Prerequisation
-1. Create a Connected App in Anypoint Platform, and assign it following permissions:
-- Runtime Manager: Download Applications
-- Runtime Manager: Read Applications
-2. Note the Connected App's Client ID and Client Secret
+`mule-app-analyzer` is a Node.js web app for downloading and analyzing MuleSoft application packages.
 
-## CloudHub 1.0 Workflow
-1. Get Access Token
-Call POST method to the following API to get the access token:
+Current scope:
+- Supports CloudHub 1.0 download workflow
+- Analyzes Mule application archives in `mule-apps/`
+- Supports both `.jar` and `.zip` application files
 
+## Prerequisites
+
+1. Node.js `v26.0.0` or newer
+2. A Connected App in Anypoint Platform with:
+   - Runtime Manager: Download Applications
+   - Runtime Manager: Read Applications
+3. Connected App credentials:
+   - `client_id`
+   - `client_secret`
+
+## Run the Application
+
+Start the app:
+
+```bash
+node mule-app-analyzer <client_id> <client_secret>
 ```
+
+Open in browser:
+
+```text
+http://localhost:3000/
+```
+
+## Web UI Workflow
+
+After startup, the page shows two buttons:
+- `Download Applications`
+- `Analyze Applications`
+
+### 1) Download Applications
+
+Runs the CloudHub 1.0 download flow:
+1. Get access token
+2. List applications
+3. Download application package files into `mule-apps/`
+
+Behavior:
+- Creates `mule-apps/` if missing
+- Skips files already present in `mule-apps/` (by `fileName`)
+- Shows progress in table + percentage
+
+This step is optional if you already have application `.jar`/`.zip` files.  
+You can place them directly in `mule-apps/` and then run Analyze.
+
+### 2) Analyze Applications
+
+Analyzes all `.jar` and `.zip` files in `mule-apps/` and fills result tables.
+
+#### Table A: Dependencies
+Columns:
+- `File Name`
+- `Application Name`
+- `Dependency`
+- `Version`
+- `Status`
+
+Data source:
+- Reads `pom.xml` from each archive
+- Uses:
+  - `project.name` as `Application Name`
+  - each `dependencies.dependency.artifactId` as `Dependency`
+  - each `dependencies.dependency.version` as `Version`
+
+#### Table B: Source Event Type
+Columns:
+- `File Name`
+- `Application Name`
+- `Flow Name`
+- `Source Event Type`
+- `Status`
+
+Logic:
+- Scans Mule XML files in the application package
+- Finds `<flow name="..."> ... </flow>`
+- Detects event sources with pattern `<*:listener`  
+  Examples: `<http:listener>`, `<jms:listener>`
+- Populates:
+  - `Flow Name` from `flow name`
+  - `Source Event Type` from namespace prefix (`http`, `jms`, etc.)
+
+#### Table C: Salesforce Auth Type
+Columns:
+- `File Name`
+- `Application Name`
+- `Salesforce Auth Type`
+- `Status`
+
+Logic:
+- Includes only applications that contain `<salesforce:sfdc-config ...>`
+- Inside each config, finds tags like `<salesforce:*-connection .../>`
+- Populates `*` into `Salesforce Auth Type`  
+  Examples: `oauth-user-pass`, `oauth-client-credentials`
+
+Applications without Salesforce config are skipped from this table.
+
+## CloudHub 1.0 API Sequence (Reference)
+
+### 1) Get Access Token
+
+Endpoint:
+
+```text
 https://anypoint.mulesoft.com/accounts/api/v2/oauth2/token
 ```
 
-The request payload is:
+Request:
+
 ```json
 {
-    "client_id": "{{connected_app_client_id}}",
-    "client_secret": "{{connected_app_client_secret}}",
-    "grant_type": "client_credentials"
+  "client_id": "{{connected_app_client_id}}",
+  "client_secret": "{{connected_app_client_secret}}",
+  "grant_type": "client_credentials"
 }
 ```
 
-Both {{connected_app_client_id}} and {{connected_app_client_secret}} are passed to the application when running the app. For example:
-`
-node mule-app-analyzer client_id client_secret
-`
+Sample response:
 
-The API response is like below:
 ```json
 {
-    "access_token": "2cd9e3b2-55c6-4c2c-9c89-87cf61d9c4ee",
-    "expires_in": 2212,
-    "token_type": "bearer"
+  "access_token": "2cd9e3b2-55c6-4c2c-9c89-87cf61d9c4ee",
+  "expires_in": 2212,
+  "token_type": "bearer"
 }
 ```
 
-The "access_token" will be used for all following APIs.
+### 2) Get Application List
 
-2. Get List of Applications
-Call GET method to the following API to get the list of applications:
+Endpoint:
 
-```
+```text
 https://anypoint.mulesoft.com/cloudhub/api/v2/applications
 ```
 
-The sample response. It returns 2 applications:
+Important fields used:
+- `domain`
+- `fileName`
 
-```json
-[
-    {
-        "versionId": "6a14f663bfcad56ed4042c15",
-        "domain": "test-sf-connector-app123",
-        ...
-        "lastUpdateTime": 1779758843024,
-        "fileName": "test-message-logging.jar",
-        ...
-    },
-    {
-        "versionId": "6a153d00341d863350ea6432",
-        "domain": "test-jms-consumer-app",
-        ...
-        "fileName": "demo-otlp-jms-consumer.jar",
-        ...
-    }
-]
-```
+### 3) Download Application Package
 
-We're only interested in the "domain" and "fileName". Both will be used for the next step.
+Endpoint template:
 
-3. Download Application's .jar File
-Loop each application returned from Step 2 and note the "domain" and "fileName".
-
-Call GET method to the following API and replace {{domain}} and {{fileName}}:
-
-```
+```text
 https://anypoint.mulesoft.com/cloudhub/api/applications/{{domain}}/download/{{fileName}}
 ```
-
-The API will download the applicaiton's .jar file, please save the downloaded .jar file into the folder "mule-apps". If "mule-apps" folder doesn't exist, then create it. Before calling the API to download the application, please firstly check if it exists in the "mule-apps" folder by checking the "fileName". If yes, please skip the download.
-
-## Application Workflow
-1. After the application is started, it provides a URL to open in your browser.
-2. The web page shows two buttons: 
-- Download Applications
-- Analyze Applications
-3. By clicking "Download Applications" button, it triggers the "CloudHub 1.0 Workflow". To help the user to see the progress, please provide each application's download progress with progress bar or percentage.
