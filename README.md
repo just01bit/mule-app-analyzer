@@ -39,6 +39,12 @@ After startup, the page shows two buttons:
 - `Download Applications`
 - `Analyze Applications`
 
+Example UI screenshot:
+
+![Mule App Analyzer UI](file:///Users/liang.dai/.cursor/projects/Users-liang-dai-Documents-01-dev-cursor-workspace-mule-app-analyzer/assets/image-840cdd83-345a-4d81-b9dd-dda18a08c741.png)
+
+_Sample output after running download and analyze workflows._
+
 ### 1) Download Applications
 
 Runs the CloudHub 1.0 download flow:

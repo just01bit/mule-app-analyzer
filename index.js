@@ -749,6 +749,28 @@ function getHtmlPage() {
       top: 0;
       z-index: 1;
     }
+    .filter-row th {
+      position: sticky;
+      top: 38px;
+      background: #f8fbff;
+      z-index: 2;
+      padding: 0.4rem 0.52rem;
+    }
+    .filter-input, .filter-select {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #c9d8ff;
+      border-radius: 8px;
+      padding: 0.32rem 0.45rem;
+      font-size: 0.82rem;
+      color: #1e293b;
+      background: #ffffff;
+    }
+    .filter-input:focus, .filter-select:focus {
+      outline: none;
+      border-color: #6d8bc0;
+      box-shadow: 0 0 0 2px rgba(109, 139, 192, 0.18);
+    }
     tr:last-child td { border-bottom: none; }
     tr:nth-child(even) td { background: #fbfdff; }
     .table-header { margin-top: 1.1rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
@@ -785,6 +807,20 @@ function getHtmlPage() {
             <th>File Name</th>
             <th>Status</th>
           </tr>
+          <tr class="filter-row">
+            <th><input id="downloadFilterAppName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="downloadFilterFileName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th>
+              <select id="downloadFilterStatus" class="filter-select">
+                <option value="">All</option>
+                <option value="new">new</option>
+                <option value="downloading">downloading</option>
+                <option value="downloaded">downloaded</option>
+                <option value="skipped">skipped</option>
+                <option value="failed">failed</option>
+              </select>
+            </th>
+          </tr>
         </thead>
         <tbody id="outputRows"></tbody>
       </table>
@@ -810,6 +846,21 @@ function getHtmlPage() {
             <th>Version</th>
             <th>Status</th>
           </tr>
+          <tr class="filter-row">
+            <th><input id="depFilterFileName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="depFilterAppName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="depFilterDependency" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="depFilterVersion" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th>
+              <select id="depFilterStatus" class="filter-select">
+                <option value="">All</option>
+                <option value="New">New</option>
+                <option value="Analyzing">Analyzing</option>
+                <option value="Complete">Complete</option>
+                <option value="Failed">Failed</option>
+              </select>
+            </th>
+          </tr>
         </thead>
         <tbody id="dependencyRows"></tbody>
       </table>
@@ -829,6 +880,21 @@ function getHtmlPage() {
             <th>Source Event Type</th>
             <th>Status</th>
           </tr>
+          <tr class="filter-row">
+            <th><input id="sourceFilterFileName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="sourceFilterAppName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="sourceFilterFlowName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="sourceFilterEventType" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th>
+              <select id="sourceFilterStatus" class="filter-select">
+                <option value="">All</option>
+                <option value="New">New</option>
+                <option value="Analyzing">Analyzing</option>
+                <option value="Complete">Complete</option>
+                <option value="Failed">Failed</option>
+              </select>
+            </th>
+          </tr>
         </thead>
         <tbody id="sourceEventRows"></tbody>
       </table>
@@ -846,6 +912,20 @@ function getHtmlPage() {
             <th>Application Name</th>
             <th>Salesforce Auth Type</th>
             <th>Status</th>
+          </tr>
+          <tr class="filter-row">
+            <th><input id="sfFilterFileName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="sfFilterAppName" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th><input id="sfFilterAuthType" class="filter-input" type="text" placeholder="Filter" /></th>
+            <th>
+              <select id="sfFilterStatus" class="filter-select">
+                <option value="">All</option>
+                <option value="New">New</option>
+                <option value="Analyzing">Analyzing</option>
+                <option value="Complete">Complete</option>
+                <option value="Failed">Failed</option>
+              </select>
+            </th>
           </tr>
         </thead>
         <tbody id="salesforceAuthRows"></tbody>
@@ -869,8 +949,26 @@ function getHtmlPage() {
     const downloadDependenciesCsvBtn = document.getElementById("downloadDependenciesCsvBtn");
     const downloadSourceEventCsvBtn = document.getElementById("downloadSourceEventCsvBtn");
     const downloadSalesforceAuthCsvBtn = document.getElementById("downloadSalesforceAuthCsvBtn");
+    const downloadFilterAppName = document.getElementById("downloadFilterAppName");
+    const downloadFilterFileName = document.getElementById("downloadFilterFileName");
+    const downloadFilterStatus = document.getElementById("downloadFilterStatus");
+    const depFilterFileName = document.getElementById("depFilterFileName");
+    const depFilterAppName = document.getElementById("depFilterAppName");
+    const depFilterDependency = document.getElementById("depFilterDependency");
+    const depFilterVersion = document.getElementById("depFilterVersion");
+    const depFilterStatus = document.getElementById("depFilterStatus");
+    const sourceFilterFileName = document.getElementById("sourceFilterFileName");
+    const sourceFilterAppName = document.getElementById("sourceFilterAppName");
+    const sourceFilterFlowName = document.getElementById("sourceFilterFlowName");
+    const sourceFilterEventType = document.getElementById("sourceFilterEventType");
+    const sourceFilterStatus = document.getElementById("sourceFilterStatus");
+    const sfFilterFileName = document.getElementById("sfFilterFileName");
+    const sfFilterAppName = document.getElementById("sfFilterAppName");
+    const sfFilterAuthType = document.getElementById("sfFilterAuthType");
+    const sfFilterStatus = document.getElementById("sfFilterStatus");
     let downloadPollTimer = null;
     let analyzePollTimer = null;
+    let latestDownloadStatus = { applications: [] };
     let latestAnalyzeStatus = {
       dependencyRows: [],
       sourceEventRows: [],
@@ -885,6 +983,7 @@ function getHtmlPage() {
     }
 
     function renderStatus(data) {
+      latestDownloadStatus = data || latestDownloadStatus;
       progressBar.value = data.percentage || 0;
       const startTime = data.startedAt ? new Date(data.startedAt).toLocaleString() : "-";
       const completeTime = data.finishedAt ? new Date(data.finishedAt).toLocaleString() : "-";
@@ -893,7 +992,35 @@ function getHtmlPage() {
         data.downloaded + ", skipped: " + data.skipped + ", failed: " + data.failed;
       downloadTimeText.textContent = "Start time: " + startTime + " | Complete time: " + completeTime;
 
-      outputRows.innerHTML = (data.applications || [])
+      renderDownloadRows(data.applications || []);
+      
+      if (!data.running && downloadPollTimer) {
+        clearInterval(downloadPollTimer);
+        downloadPollTimer = null;
+        downloadBtn.disabled = false;
+      }
+    }
+
+    function matchesFilterValue(value, filterText) {
+      const text = String(value === undefined || value === null ? "" : value).toLowerCase();
+      return text.includes(filterText.toLowerCase());
+    }
+
+    function renderDownloadRows(rows) {
+      const appFilter = downloadFilterAppName.value.trim();
+      const fileFilter = downloadFilterFileName.value.trim();
+      const statusFilter = downloadFilterStatus.value.trim();
+      outputRows.innerHTML = (rows || [])
+        .filter((app) => {
+          const appName = app.domain || "";
+          const fileName = app.fileName || "";
+          const status = app.status || "";
+          return (
+            (!appFilter || matchesFilterValue(appName, appFilter)) &&
+            (!fileFilter || matchesFilterValue(fileName, fileFilter)) &&
+            (!statusFilter || status === statusFilter)
+          );
+        })
         .map((app) => {
           const safeStatus = escapeHtml(app.status || "new");
           return "<tr>" +
@@ -903,12 +1030,6 @@ function getHtmlPage() {
             "</tr>";
         })
         .join("");
-
-      if (!data.running && downloadPollTimer) {
-        clearInterval(downloadPollTimer);
-        downloadPollTimer = null;
-        downloadBtn.disabled = false;
-      }
     }
 
     async function fetchStatus() {
@@ -941,8 +1062,31 @@ function getHtmlPage() {
         "Analyze Progress: " + (data.percentage || 0) + "% (" + data.processed + "/" + data.total +
         "), complete: " + data.complete + ", failed: " + data.failed;
       analyzeTimeText.textContent = "Start time: " + startTime + " | Complete time: " + completeTime;
+      renderDependencyRows(data.dependencyRows || []);
+      renderSourceEventRows(data.sourceEventRows || []);
+      renderSalesforceAuthRows(data.salesforceAuthRows || []);
+      
+      if (!data.running && analyzePollTimer) {
+        clearInterval(analyzePollTimer);
+        analyzePollTimer = null;
+        analyzeBtn.disabled = false;
+      }
+    }
 
-      dependencyRows.innerHTML = (data.dependencyRows || [])
+    function renderDependencyRows(rows) {
+      const fileFilter = depFilterFileName.value.trim();
+      const appFilter = depFilterAppName.value.trim();
+      const dependencyFilter = depFilterDependency.value.trim();
+      const versionFilter = depFilterVersion.value.trim();
+      const statusFilter = depFilterStatus.value.trim();
+      dependencyRows.innerHTML = (rows || [])
+        .filter((row) =>
+          (!fileFilter || matchesFilterValue(row.fileName, fileFilter)) &&
+          (!appFilter || matchesFilterValue(row.applicationName, appFilter)) &&
+          (!dependencyFilter || matchesFilterValue(row.dependency, dependencyFilter)) &&
+          (!versionFilter || matchesFilterValue(row.version, versionFilter)) &&
+          (!statusFilter || row.status === statusFilter)
+        )
         .map((row) => {
           const safeStatus = escapeHtml(row.status || "New");
           return "<tr>" +
@@ -954,7 +1098,22 @@ function getHtmlPage() {
             "</tr>";
         })
         .join("");
-      sourceEventRows.innerHTML = (data.sourceEventRows || [])
+    }
+
+    function renderSourceEventRows(rows) {
+      const fileFilter = sourceFilterFileName.value.trim();
+      const appFilter = sourceFilterAppName.value.trim();
+      const flowFilter = sourceFilterFlowName.value.trim();
+      const eventTypeFilter = sourceFilterEventType.value.trim();
+      const statusFilter = sourceFilterStatus.value.trim();
+      sourceEventRows.innerHTML = (rows || [])
+        .filter((row) =>
+          (!fileFilter || matchesFilterValue(row.fileName, fileFilter)) &&
+          (!appFilter || matchesFilterValue(row.applicationName, appFilter)) &&
+          (!flowFilter || matchesFilterValue(row.flowName, flowFilter)) &&
+          (!eventTypeFilter || matchesFilterValue(row.sourceEventType, eventTypeFilter)) &&
+          (!statusFilter || row.status === statusFilter)
+        )
         .map((row) => {
           const safeStatus = escapeHtml(row.status || "New");
           return "<tr>" +
@@ -966,7 +1125,20 @@ function getHtmlPage() {
             "</tr>";
         })
         .join("");
-      salesforceAuthRows.innerHTML = (data.salesforceAuthRows || [])
+    }
+
+    function renderSalesforceAuthRows(rows) {
+      const fileFilter = sfFilterFileName.value.trim();
+      const appFilter = sfFilterAppName.value.trim();
+      const authTypeFilter = sfFilterAuthType.value.trim();
+      const statusFilter = sfFilterStatus.value.trim();
+      salesforceAuthRows.innerHTML = (rows || [])
+        .filter((row) =>
+          (!fileFilter || matchesFilterValue(row.fileName, fileFilter)) &&
+          (!appFilter || matchesFilterValue(row.applicationName, appFilter)) &&
+          (!authTypeFilter || matchesFilterValue(row.salesforceAuthType, authTypeFilter)) &&
+          (!statusFilter || row.status === statusFilter)
+        )
         .map((row) => {
           const safeStatus = escapeHtml(row.status || "New");
           return "<tr>" +
@@ -977,12 +1149,6 @@ function getHtmlPage() {
             "</tr>";
         })
         .join("");
-
-      if (!data.running && analyzePollTimer) {
-        clearInterval(analyzePollTimer);
-        analyzePollTimer = null;
-        analyzeBtn.disabled = false;
-      }
     }
 
     async function fetchAnalyzeStatus() {
@@ -1077,6 +1243,33 @@ function getHtmlPage() {
       await saveCsv("salesforce-auth-type-result.csv", csvContent);
     });
 
+    function registerFilterListeners() {
+      const downloadFilterEls = [downloadFilterAppName, downloadFilterFileName, downloadFilterStatus];
+      const depFilterEls = [depFilterFileName, depFilterAppName, depFilterDependency, depFilterVersion, depFilterStatus];
+      const sourceFilterEls = [
+        sourceFilterFileName,
+        sourceFilterAppName,
+        sourceFilterFlowName,
+        sourceFilterEventType,
+        sourceFilterStatus,
+      ];
+      const sfFilterEls = [sfFilterFileName, sfFilterAppName, sfFilterAuthType, sfFilterStatus];
+
+      downloadFilterEls.forEach((el) =>
+        el.addEventListener("input", () => renderDownloadRows(latestDownloadStatus.applications || []))
+      );
+      depFilterEls.forEach((el) =>
+        el.addEventListener("input", () => renderDependencyRows(latestAnalyzeStatus.dependencyRows || []))
+      );
+      sourceFilterEls.forEach((el) =>
+        el.addEventListener("input", () => renderSourceEventRows(latestAnalyzeStatus.sourceEventRows || []))
+      );
+      sfFilterEls.forEach((el) =>
+        el.addEventListener("input", () => renderSalesforceAuthRows(latestAnalyzeStatus.salesforceAuthRows || []))
+      );
+    }
+
+    registerFilterListeners();
     fetchStatus();
     fetchAnalyzeStatus();
   </script>
