@@ -248,18 +248,18 @@ async function runAnalyzeWorkflow() {
   analyzeState.running = true;
   analyzeState.status = "running";
   analyzeState.startedAt = new Date().toISOString();
-  updateAnalyzeState("running", "Scanning mule-apps folder for jar files...");
+  updateAnalyzeState("running", "Scanning mule-apps folder for jar/zip files...");
 
-  const jarFiles = await listJarFiles(DOWNLOAD_DIR);
-  analyzeState.total = jarFiles.length;
-  analyzeState.dependencyRows = jarFiles.map((fileName) => ({
+  const appArchiveFiles = await listAppArchiveFiles(DOWNLOAD_DIR);
+  analyzeState.total = appArchiveFiles.length;
+  analyzeState.dependencyRows = appArchiveFiles.map((fileName) => ({
     fileName,
     applicationName: "",
     dependency: "",
     version: "",
     status: "New",
   }));
-  analyzeState.sourceEventRows = jarFiles.map((fileName) => ({
+  analyzeState.sourceEventRows = appArchiveFiles.map((fileName) => ({
     fileName,
     applicationName: "",
     flowName: "",
@@ -267,15 +267,15 @@ async function runAnalyzeWorkflow() {
     status: "New",
   }));
 
-  if (jarFiles.length === 0) {
+  if (appArchiveFiles.length === 0) {
     analyzeState.running = false;
     analyzeState.status = "completed";
     analyzeState.finishedAt = new Date().toISOString();
-    updateAnalyzeState("completed", "No jar files found in mule-apps.");
+    updateAnalyzeState("completed", "No jar/zip files found in mule-apps.");
     return;
   }
 
-  for (const fileName of jarFiles) {
+  for (const fileName of appArchiveFiles) {
     setAnalyzeStatusForFile(fileName, "Analyzing", "both");
     const jarPath = path.join(DOWNLOAD_DIR, fileName);
 
@@ -349,11 +349,11 @@ async function runAnalyzeWorkflow() {
   );
 }
 
-async function listJarFiles(dirPath) {
+async function listAppArchiveFiles(dirPath) {
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
     return entries
-      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".jar"))
+      .filter((entry) => entry.isFile() && isSupportedAppArchive(entry.name))
       .map((entry) => entry.name);
   } catch (error) {
     if (error?.code === "ENOENT") {
@@ -361,6 +361,11 @@ async function listJarFiles(dirPath) {
     }
     throw error;
   }
+}
+
+function isSupportedAppArchive(fileName) {
+  const lowerName = fileName.toLowerCase();
+  return lowerName.endsWith(".jar") || lowerName.endsWith(".zip");
 }
 
 function readPomXmlFromJar(jarPath) {
