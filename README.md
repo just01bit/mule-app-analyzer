@@ -5,8 +5,8 @@
 `mule-app-analyzer` is a Node.js web app for downloading and analyzing MuleSoft application packages.
 
 Current scope:
-- Supports CloudHub 1.0 download workflow
-- Analyzes Mule application archives in `mule-apps/`
+- Currently supports the CloudHub 1.0 download workflow. Support for CloudHub 2.0 and RTF downloads will be added in the future.
+- Analyzes Mule application archives in `mule-apps/`. 
 - Supports both `.jar` and `.zip` application files
 
 ## Prerequisites
@@ -41,7 +41,7 @@ After startup, the page shows two buttons:
 
 Example UI screenshot:
 
-![Mule App Analyzer UI](file:///Users/liang.dai/.cursor/projects/Users-liang-dai-Documents-01-dev-cursor-workspace-mule-app-analyzer/assets/image-840cdd83-345a-4d81-b9dd-dda18a08c741.png)
+![Mule App Analyzer UI](assets/mule-app-analyzer-ui.png)
 
 _Sample output after running download and analyze workflows._
 
